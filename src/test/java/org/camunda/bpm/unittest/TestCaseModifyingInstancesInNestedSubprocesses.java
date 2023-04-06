@@ -22,26 +22,31 @@ import static org.camunda.bpm.engine.test.assertions.bpmn.BpmnAwareTests.complet
 import static org.camunda.bpm.engine.test.assertions.bpmn.BpmnAwareTests.processInstanceQuery;
 import static org.camunda.bpm.engine.test.assertions.bpmn.BpmnAwareTests.runtimeService;
 import static org.camunda.bpm.engine.test.assertions.bpmn.BpmnAwareTests.task;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import org.camunda.bpm.engine.history.HistoricActivityInstance;
 import org.camunda.bpm.engine.runtime.ProcessInstance;
 import org.camunda.bpm.engine.test.Deployment;
 import org.camunda.bpm.engine.test.junit5.ProcessEngineExtension;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
+import java.util.List;
+
 /**
  * @author Daniel Meyer
  * @author Martin Schimak
  */
-public class SimpleTestCase {
+public class TestCaseModifyingInstancesInNestedSubprocesses {
 
   @RegisterExtension
   ProcessEngineExtension extension = ProcessEngineExtension.builder()
     .build();
 
   @Test
-  @Deployment(resources = {"testProcess.bpmn"})
-  public void shouldExecuteProcess() {
+  @Deployment(resources = { "nestedSubprocesses.bpmn" })
+  public void shouldSetParentIDWhenModified() {
     // Given we create a new process instance
     ProcessInstance processInstance = runtimeService().startProcessInstanceByKey("testProcess");
     // Then it should be active
@@ -50,11 +55,22 @@ public class SimpleTestCase {
     assertThat(processInstanceQuery().count()).isEqualTo(1);
     // And there should exist just a single task within that process instance
     assertThat(task(processInstance)).isNotNull();
+    // When we modify the instance and move the execution to the next subprocess
+    extension.getRuntimeService().createProcessInstanceModification(processInstance.getProcessInstanceId())
+        .startTransition("Flow_0n3b37l")
+        .cancelAllForActivity("Task1")
+        .execute();
 
-    // When we complete that task
-    complete(task(processInstance));
-    // Then the process instance should be ended
-    assertThat(processInstance).isEnded();
+    // Then there is one instance of this subprocess in the history service
+    List<HistoricActivityInstance> historicInstancesOfSubprocess3 = extension.getHistoryService()
+        .createHistoricActivityInstanceQuery()
+        .processInstanceId(processInstance.getProcessInstanceId())
+        .activityId("Subprocess3")
+        .list();
+    assertEquals(historicInstancesOfSubprocess3.size(), 1);
+    // We expect that this instance has a parent ID (i.e., the id of the sourrounding
+    assertNotNull(historicInstancesOfSubprocess3.get(0).getParentActivityInstanceId(), "T");
+
   }
 
 }
